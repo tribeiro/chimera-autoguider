@@ -1,35 +1,52 @@
-chimera_template plugin
+chimera-autoguider plugin
 =======================
 
-This is a template plugin for the chimera observatory control system
-https://github.com/astroufsc/chimera.
+This is a telescope auto-guider plugin for the chimera observatory control system
+(https://github.com/astroufsc/chimera).
+
+
+This controller is reponsible for proving auto-guiding capabilities
+to a telescope. It works by acquiring a star in a CCD and trying to
+guarantee that it remain in its initial position, offsetting the
+telescope accordingly. The operation is divided in two steps.
+
+1) Finding a guide star
+2) Guiding
+
+Finding a guide star consists of:
+
+1) Take an acquisition image
+2) Check if a predetermined guide-star is in the FoV or try to
+    find a suitable bright star for guiding. Raise an exception if
+    no guide star is found.
+3) Calculate the position of the star in the CCD (using centroid)
+
+Guiding consists of
+
+1) Take an image
+2) Calculate the centroid of the guide-star
+3) Offset the telescope
+4) Repeat until stopped or an error occur.
 
 Usage
 -----
 
-Rename chimera_template for your plugin name. It is important that the plugin
-name must start with chimera\_ to be found by chimera. Instruments and
-controllers must follow the standard ``chimera_(plugin_name)/(instruments|controllers)/(plugin).py``
-
-The class inside ``(plugin).py`` should be named Plugin (with CamelCase letters).
-
-For more info: https://github.com/astroufsc/chimera/blob/master/docs/site/chimerafordevs.rst#chimera-objects
 
 
 Installation
 ------------
 
-Installation instructions. Dependencies, etc...
+Installation instructions.
 
 ::
 
-   pip install -U chimera_template
+   pip install -U chimera-autoguider
 
 or
 
 ::
 
-    pip install -U git+https://github.com/astroufsc/chimera_template.git
+    pip install -U git+https://github.com/astroufsc/chimera_autoguider.git
 
 
 Configuration Example
