@@ -1,0 +1,171 @@
+#! /usr/bin/env python
+# -*- coding: iso-8859-1 -*-
+
+# chimera - observatory automation system
+# Copyright (C) 2006-2009  P. Henrique Silva <henrique@astro.ufsc.br>
+
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+# 02110-1301, USA.
+
+from chimera.core.cli import ChimeraCLI, action, ParameterType
+from chimera.core.constants import DEFAULT_PROGRAM_DATABASE
+from chimera.core.callback import callback
+from chimera.util.position import Position
+from chimera.util.output import blue, green, red
+
+import re
+import sys
+import os
+import shutil
+import time
+
+
+class ChimeraAutoGuide (ChimeraCLI):
+
+    def __init__(self):
+        ChimeraCLI.__init__(
+            self, "chimera-autoguide", "Autoguider controller", 0.1, port=9010)
+
+        self.addHelpGroup("GUIDER", "Guider")
+        self.addController(name="autoguider",
+                           cls="Autoguider",
+                           required=True,
+                           help="Autoguider controller to be used",
+                           helpGroup="GUIDER")
+
+        self.addHelpGroup("EXPOSE", "Exposure control")
+        self.addParameters(dict(name="exptime",
+                                short="t",
+                                type="string",
+                                default=1,
+                                helpGroup="EXPOSE",
+                                help="Integration time in seconds for each frame"),
+                           dict(name="interval",
+                                short="i",
+                                type="float",
+                                default=0.0,
+                                helpGroup="EXPOSE",
+                                help="Number of seconds to wait between each frame"),
+                           dict(name="output",
+                                short="o",
+                                type="string",
+                                helpGroup="EXPOSE",
+                                help="Base filename including full path if needed.",
+                                default="$DATE-$TIME.fits"),
+                           dict(name="filter",
+                                long="filters",
+                                short="f",
+                                type="string",
+                                helpGroup="EXPOSE",
+                                help="Filter(s) to be used. "
+                                     "Use --list-filters to get a list of available filters. "),
+                           dict(name="binning",
+                                help="Apply the selected binning to all frames",
+                                helpGroup="EXPOSE"),
+                           dict(name="size",
+                                help="Size of guiding window. This is applied regardless of windowing is On or Off."
+                                "If not set will be automatically chosen as 10x the FWHM.",
+                                type="int",
+                                helpGroup="EXPOSE"),
+                           dict(name="window",
+                                type=ParameterType.BOOLEAN,
+                                default=False,
+                                helpGroup="EXPOSE",
+                                help="Window the CCD during guiding exposures? Acquisition images are not windowed."
+                                "This can improve guiding speed considerably."))
+
+        self.addHelpGroup("COORDS", "Coordinates for guiding star. Telescope needs to be pointed before starting the controller.")
+        self.addParameters(dict(name="ra",
+                                type="string",
+                                helpGroup="COORDS",
+                                help="Right Ascension."),
+                           dict(
+                               name="dec",
+                               type="string",
+                               helpGroup="COORDS",
+                               help="Declination."),
+                           dict(
+                               name="epoch",
+                               type="string",
+                               default="J2000",
+                               helpGroup="COORDS",
+                               help="Epoch"),
+                           dict(name="objectName",
+                                long="object",
+                                type="string",
+                                helpGroup="COORDS",
+                                help="Object name"),)
+
+        self.addHelpGroup("RUN", "Start/Stop/Info")
+
+    @action(help="Start the autoguider", helpGroup="RUN", actionGroup="RUN")
+    def start(self, options):
+        self.out("=" * 40)
+        self.out("Starting ...", end="")
+        # ToDo: Pass coordinates Ra/Dec or resolve object name
+        self.autoguider.guide(exptime=options.exptime,
+                              interval=options.interval,
+                              filter=options.filter,
+                              binning=options.binning,
+                              windowCCD=options.window,
+                              box=options.size)
+        self.out("%s" % green("OK"))
+        self.out("=" * 40)
+        self.monitor(options)
+
+    @action(help="Stop the autoguider", helpGroup="RUN", actionGroup="RUN")
+    def stop(self, options):
+        self.autoguider.stop()
+        self.out("OK")
+
+    @action(help="Print autoguider information", helpGroup="RUN")
+    def info(self, options):
+        self.out("=" * 40)
+        self.out("Autoguider: %s" % self.autoguider.getLocation())
+        self.out("State: %s" % self.autoguider.state())
+        self.out("=" * 40)
+
+    @action(help="Monitor autoguider actions", helpGroup="RUN")
+    def monitor(self, options):
+
+        @callback(self.localManager)
+        def offsetCompleteClbk(offset):
+            self.out("=" * 40)
+            self.out("%s: N - %f | E - %f" % (blue("[autoguider]"), offset['N'], offset['E']))
+
+        @callback(self.localManager)
+        def guideStartClbk(position):
+            self.out("%s: Starting to guide @ (%f,%f)" % (blue("[autoguider]"), 0.,0.))#position['RA'], position['Dec']))
+
+        @callback(self.localManager)
+        def guideStopClbk(state, message=None):
+            # self.out("%s: Stopped with status %s: %s" % (red("[autoguider] "), state, message), end="")
+            self.exit("%s: Stopped with status %s: %s" % (red("[autoguider] "), state, message))
+
+        self.autoguider.offsetComplete += offsetCompleteClbk
+        self.autoguider.guideStart += guideStartClbk
+        self.autoguider.guideStop += guideStopClbk
+
+        self.wait(abort=False)
+
+
+def main():
+    cli = ChimeraAutoGuide()
+    cli.run(sys.argv)
+    cli.wait()
+
+if __name__ == '__main__':
+
+    main()

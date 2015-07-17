@@ -252,13 +252,16 @@ class FakeGuiderCamera (CameraBase, FilterWheelBase):
                             self.log.warning(
                                 "General error getting DSS image: " + str(e))
 
+                        self.log.debug('Image size: %i,%i'%pix.shape)
                         # Apply random offset to the pix image
-                        offset = N.random.randint(-self["max_offset"]/2, self["max_offset"], size=2)
+                        offset = N.random.randint(-self["max_offset"]/2, self["max_offset"]/2, size=2)
+                        self.log.debug('Image offset is %i x %i'%(offset[0],offset[1]))
                         ximg_corner = [int(self["max_offset"]/2),
                                        int(self["max_offset"]/2)]
                         img_corner = N.sum([ximg_corner, offset], axis=0)  # Add an offset to the corner pixel of the image
                         img_cut_new = N.copy(pix[img_corner[0]:img_corner[0] + ccd_height, img_corner[1]:img_corner[1] + ccd_width])
-                        pix = img_cut_new[self["max_offset"]:self["max_offset"], self["max_offset"]:-self["max_offset"]]
+                        pix = img_cut_new #[self["max_offset"]/2:-self["max_offset"]/2, self["max_offset"]/2:-self["max_offset"]/2]
+                        self.log.debug('Image size: %i,%i'%pix.shape)
 
                     # dome not aligned, take a 'dome flat'
                     else:

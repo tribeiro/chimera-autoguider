@@ -120,12 +120,13 @@ class AutoGuider(ChimeraObject,IAutoguider):
             self._log_handler.close()
 
     @lock
-    def guide(self,position=None,exptime=None,filter=None,binning=None,
+    def guide(self,position=None,exptime=None,interval=None,filter=None,binning=None,
               windowCCD=True,box=None,debug=False):
         """
 
         :param position: <type Position>. Ra/Dec of the guide star. Leave empty for automatic search.
         :param exptime: Exposure time of the acquisition images. This will set the frequency of updates as well.
+        :param interval: Time to wait between guiding sequence. This will lower the frequency of updates.
         :param filter: Filter for the exposures.
         :param binning: Binning of the guide CCD
         :param windowCCD: Flag to window the acquisition images to the size of the guiding box. This may speed the
@@ -204,30 +205,46 @@ class AutoGuider(ChimeraObject,IAutoguider):
 
             self.abort.clear()
             self.guideStart(star_found)
-            nlost = 0
+
             msg=''
             self._state = GuiderStatus.GUIDING
 
-            while True:
-                offset = self.getOffset(star_found)
-                if offset:
-                    self.log.debug('Applying offset %s x %s'%(offset['N'],offset['E']))
-                    self.applyOffset(offset)
-                    self.offsetComplete(offset)
-                else:
-                    nlost+=1
+            def process():
+                nlost = 0
 
-                if self.abort.isSet():
-                    self._state = GuiderStatus.ABORTED
-                    msg = 'Sequence aborted.'
-                    break
+                while True:
+                    offset = self.getOffset(star_found)
+                    self.log.debug('Offset %f x %f'%(offset['N'],offset['E']))
+                    if offset:
+                        self.log.debug('Applying offset %s x %s'%(offset['N'],offset['E']))
+                        self.applyOffset(offset)
+                        self.offsetComplete(offset)
+                    else:
+                        nlost+=1
 
-                if nlost > self['nlost']:
-                    self._state = GuiderStatus.ERROR
-                    msg = 'Lost guide star. Stopping after %i tries.'%self['nlost']
-                    break
+                    if self.abort.isSet():
+                        self._state = GuiderStatus.ABORTED
+                        msg = 'Sequence aborted.'
+                        break
 
-            self.guideStop(self._state,msg)
+                    if nlost > self['nlost']:
+                        self._state = GuiderStatus.ERROR
+                        msg = 'Lost guide star. Stopping after %i tries.'%self['nlost']
+                        break
+
+                    if interval:
+                        time.sleep(interval)
+
+                self.guideStop(self._state,msg)
+
+            t = threading.Thread(target=process)
+            t.setDaemon(False)
+            t.start()
+
+        except Exception, e:
+            self._state = GuiderStatus.ERROR
+            self.guideStop(self._state,e)
+            raise
 
         finally:
             # reset debug counter
@@ -312,8 +329,28 @@ class AutoGuider(ChimeraObject,IAutoguider):
         return max(fluxes, key=lambda star: star["FLUX_BEST"])
 
 
-    def getOffset(self):
-        return 0
+    def getOffset(self,position):
+
+        ret = {'N':0.,'E':0.,'Status':self.state()}
+
+        try:
+            frame = self._takeImage()
+        except:
+            if self.abort.isSet():
+                ret['Status'] = GuiderStatus.ABORTED
+                return ret
+            else:
+                raise
+        return ret
 
     def applyOffset(self, offset):
         return
+
+    def stop(self):
+
+        self.abort.set() # do this first!
+        self.getCam().abortExposure(readout=False)
+        self._state = GuiderStatus.OFF
+
+    def state(self):
+        return self._state
