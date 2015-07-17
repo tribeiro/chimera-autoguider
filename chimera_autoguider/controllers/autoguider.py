@@ -3,6 +3,7 @@ from __future__ import division
 import time
 import os
 import logging
+import threading
 
 from chimera.core.chimeraobject import ChimeraObject
 from chimera.core.lock import lock
@@ -11,6 +12,7 @@ from chimera.core.exceptions import ChimeraException, ClassLoaderException
 from chimera.core.constants import SYSTEM_CONFIG_DIRECTORY
 
 from chimera.interfaces.autoguider import Autoguider as IAutoguider
+from chimera.interfaces.autoguider import GuiderStatus
 from chimera.interfaces.autoguider import StarNotFoundException
 
 from chimera.controllers.imageserver.imagerequest import ImageRequest
@@ -71,6 +73,11 @@ class AutoGuider(ChimeraObject,IAutoguider):
         self._debug_image = 0
 
         self._log_handler = None
+
+        self._state = GuiderStatus.OFF
+
+        self.abort = threading.Event()
+        self.abort.clear()
 
     def getTel(self):
         return self.getManager().getProxy(self["telescope"])
@@ -179,14 +186,134 @@ class AutoGuider(ChimeraObject,IAutoguider):
                 tries += 1
 
             if not star_found:
+                self._state = GuiderStatus.ERROR
                 raise StarNotFoundException("Couldn't find a suitable star to guide on."
                                             "Giving up after %d tries." % tries)
 
+        # Start guiding
+        try:
+            if windowCCD:
+                # retake first image around guide star
+                if not box:
+                    box = np.int(np.ceil(star_found['FWHM_IMAGE']*10))
+                self.imageRequest["window"] = "[%i:%i,%i:%i]"%(star_found['XWIN_IMAGE']-box/2,
+                                                               star_found['XWIN_IMAGE']+box/2,
+                                                               star_found['YWIN_IMAGE']-box/2,
+                                                               star_found['YWIN_IMAGE']+box/2)
+                star_found = self._findBestStarToGuide(self._takeImageAndResolveStars())
+
+            self.abort.clear()
+            self.guideStart(star_found)
+            nlost = 0
+            msg=''
+            self._state = GuiderStatus.GUIDING
+
+            while True:
+                offset = self.getOffset(star_found)
+                if offset:
+                    self.log.debug('Applying offset %s x %s'%(offset['N'],offset['E']))
+                    self.applyOffset(offset)
+                    self.offsetComplete(offset)
+                else:
+                    nlost+=1
+
+                if self.abort.isSet():
+                    self._state = GuiderStatus.ABORTED
+                    msg = 'Sequence aborted.'
+                    break
+
+                if nlost > self['nlost']:
+                    self._state = GuiderStatus.ERROR
+                    msg = 'Lost guide star. Stopping after %i tries.'%self['nlost']
+                    break
+
+            self.guideStop(self._state,msg)
+
+        finally:
+            # reset debug counter
+            self._debug_image = 0
+
+
     def _takeImageAndResolveStars(self):
-        return
+
+        frame = self._takeImage()
+        stars = self._findStars(frame)
+
+        return stars
+
+    def _takeImage(self):
+
+        if self._debugging:
+            pass
+            try:
+                frame = self._debug_images[self._debug_image]
+                self._debug_image += 1
+
+                img = Image.fromFile(frame)
+                srv = getImageServer(self.getManager())
+                return srv.register(img)
+            except IndexError:
+                raise ChimeraException("Cannot find debug images")
+
+        self.imageRequest["filename"] = os.path.join(SYSTEM_CONFIG_DIRECTORY, self.currentRun, "autoguider.fits")
+
+        cam = self.getCam()
+
+        if self.filter:
+            filter = self.getFilter()
+            filter.setFilter(self.filter)
+
+        frame = cam.expose(self.imageRequest)
+
+        if frame:
+            return frame[0]
+        else:
+            raise Exception("Error taking image.")
+
+    def _findStars(self, frame):
+
+        config = {}
+        config['PIXEL_SCALE'] = 0  # use WCS info
+        config['BACK_TYPE'] = "AUTO"
+
+        config['SATUR_LEVEL'] = self.getCam()["ccd_saturation_level"]
+
+        # improve speed with higher threshold
+        config['DETECT_THRESH'] = 3.0
+
+        # no output, please
+        config['VERBOSE_TYPE'] = "QUIET"
+
+        # our "star" dict entry will contain all this members
+        config['PARAMETERS_LIST'] = ["NUMBER",
+                                     "XWIN_IMAGE", "YWIN_IMAGE",
+                                     "FLUX_BEST", "FWHM_IMAGE",
+                                     "FLAGS"]
+
+        catalogName = os.path.splitext(frame.filename())[0] + ".catalog"
+        configName = os.path.splitext(frame.filename())[0] + ".config"
+        return frame.extract(config, saveCatalog=catalogName, saveConfig=configName)
 
     def _findGuideStar(self,catalog,position):
         return
 
     def _findBestStarToGuide(self,catalog):
+        # simple plan: brighter star
+        # FIXME: avoid "border" stars
+        return self._findBrighterStar(catalog)
+
+    def _findBrighterStar(self, catalog):
+
+        fluxes = [star for star in catalog if star["FLAGS"] == 0]
+
+        if not fluxes:  # empty catalog
+            return False
+
+        return max(fluxes, key=lambda star: star["FLUX_BEST"])
+
+
+    def getOffset(self):
+        return 0
+
+    def applyOffset(self, offset):
         return

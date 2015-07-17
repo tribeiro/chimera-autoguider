@@ -113,14 +113,14 @@ imsize_resampled = int(round(imsize[0] * img_scale / guider_pixelsize['x_ang']))
 pix = imresize(img, imsize_resampled)
 # TODO: DELME END
 
-px_border = 10  # Number of pixels to throw away due to border-effect
+px_border = 20  # Number of pixels to throw away due to border-effect
 max_offset = 10  # Maximum offset between images, in pixels
 
-img_corner = [int(round(pix.shape[0] / 2 - guider_size['y_px'] / 2)),
+ximg_corner = [int(round(pix.shape[0] / 2 - guider_size['y_px'] / 2)),
               int(round(pix.shape[1] / 2 - guider_size['x_px'] / 2))]
 for i in range(300):
     offset = np.random.randint(-10, 10, size=2)
-    img_corner = np.sum([img_corner, offset], axis=0)  # Add an offset to the corner pixel of the image
+    img_corner = np.sum([ximg_corner, offset], axis=0)  # Add an offset to the corner pixel of the image
     img_cut_new = np.copy(
         pix[img_corner[0]:img_corner[0] + guider_size['y_px'], img_corner[1]:img_corner[1] + guider_size['x_px']])
     img_cut_new = img_cut_new[px_border:-px_border, px_border:-px_border]

@@ -3,8 +3,7 @@ from distutils.core import setup
 setup(
     name='chimera_autoguider',
     version='0.0.1',
-    packages=['chimera_autoguider', 'chimera_autoguider.instruments', 'chimera_autoguider.controllers',
-              'chimera_autoguider.interfaces'],
+    packages=['chimera_autoguider', 'chimera_autoguider.instruments', 'chimera_autoguider.controllers'],
     scripts=[],
     url='http://github.com/astroufsc/chimera_autoguider',
     license='GPL v2',
