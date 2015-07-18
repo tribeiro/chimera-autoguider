@@ -21,6 +21,8 @@ from chimera.controllers.imageserver.util         import getImageServer
 from chimera.util.image import Image
 from chimera.util.output import red, green
 
+from astropy.io import fits
+
 import numpy as np
 import yaml
 
@@ -197,17 +199,22 @@ class AutoGuider(ChimeraObject,IAutoguider):
                 # retake first image around guide star
                 if not box:
                     box = np.int(np.ceil(star_found['FWHM_IMAGE']*10))
-                self.imageRequest["window"] = "[%i:%i,%i:%i]"%(star_found['XWIN_IMAGE']-box/2,
+                self.imageRequest["window"] = "%i:%i,%i:%i"%(star_found['XWIN_IMAGE']-box/2,
                                                                star_found['XWIN_IMAGE']+box/2,
                                                                star_found['YWIN_IMAGE']-box/2,
                                                                star_found['YWIN_IMAGE']+box/2)
+                self.log.debug('Cutting CCD in subframe: %s'%(self.imageRequest['window']))
+                # star_found['XWIN_IMAGE'],star_found['YWIN_IMAGE'] = self.getCentroid()
                 star_found = self._findBestStarToGuide(self._takeImageAndResolveStars())
+                # star_found['XWIN_IMAGE']-=box/2
+                # star_found['YWIN_IMAGE']-=box/2
 
             self.abort.clear()
             self.guideStart(star_found)
 
             msg=''
             self._state = GuiderStatus.GUIDING
+            self.index = 1
 
             def process():
                 nlost = 0
@@ -249,7 +256,6 @@ class AutoGuider(ChimeraObject,IAutoguider):
         finally:
             # reset debug counter
             self._debug_image = 0
-
 
     def _takeImageAndResolveStars(self):
 
@@ -331,7 +337,8 @@ class AutoGuider(ChimeraObject,IAutoguider):
 
     def getOffset(self,position):
 
-        ret = {'N':0.,'E':0.,'Status':self.state()}
+        ret = {'X':0.,'Y':0.,
+               'N':0.,'E':0.,'Status':self.state()}
 
         try:
             frame = self._takeImage()
@@ -341,7 +348,27 @@ class AutoGuider(ChimeraObject,IAutoguider):
                 return ret
             else:
                 raise
+
+        self.plot(frame,position,ret)
+
         return ret
+
+    def plot(self,frame,position,offset):
+
+        global plot
+
+        if plot:
+            py.figure(1)
+            fname = '/tmp/autoguider.fits'
+            if os.path.exists(fname):
+                os.remove(fname)
+            frame.save(fname)
+            img = fits.getdata(fname)
+            py.imshow(img,origin='lower',interpolation='nearest',vmax=np.mean(img)*1.1,cmap=py.cm.gray)
+            py.plot(position['XWIN_IMAGE'],position['YWIN_IMAGE'],'bo')
+            py.plot(position['XWIN_IMAGE']+offset['X'],position['YWIN_IMAGE']+offset['Y'],'ro')
+            py.savefig(os.path.join(SYSTEM_CONFIG_DIRECTORY, 'autoguider_%05i.png')%self.index)
+            self.index+=1
 
     def applyOffset(self, offset):
         return

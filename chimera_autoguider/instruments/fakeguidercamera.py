@@ -165,6 +165,7 @@ class FakeGuiderCamera (CameraBase, FilterWheelBase):
         pix = None
         telescope = None
         dome = None
+        offset = [0.,0.] # store offset on image header for comparison purposes.
 
         (mode, binning, top,  left,
          width, height) = self._getReadoutModeInfo(imageRequest["binning"],
@@ -288,10 +289,15 @@ class FakeGuiderCamera (CameraBase, FilterWheelBase):
         if (pix is None):
             pix = N.zeros((ccd_height, ccd_width), dtype=N.int32)
 
+        if ccd_height != height or ccd_width != width:
+            pix = pix[top:top+height,left:left+width]
+
         proxy = self._saveImage(
             imageRequest, pix, {"frame_start_time": self.__lastFrameStart,
                                 "frame_temperature": self.getTemperature(),
-                                "binning_factor": self._binning_factors[binning]})
+                                "binning_factor": self._binning_factors[binning],
+                                "offsetX":offset[0],
+                                "offsetY":offset[1]})
 
         # [ABORT POINT]
         if self.abort.isSet():
