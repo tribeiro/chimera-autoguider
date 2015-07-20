@@ -143,7 +143,9 @@ class ChimeraAutoGuide (ChimeraCLI):
         @callback(self.localManager)
         def offsetCompleteClbk(offset):
             self.out("=" * 40)
-            self.out("%s: N - %f | E - %f" % (blue("[autoguider]"), offset['N'], offset['E']))
+            self.out("%s: (X: %.2f | Y: %.2f ) | (N: %.2f | E: %.2f)" % (blue("[autoguider]"),
+                                                                         offset['X'], offset['Y'],
+                                                                         offset['N'], offset['E']))
 
         @callback(self.localManager)
         def guideStartClbk(position):

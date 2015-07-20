@@ -49,7 +49,8 @@ class FakeGuiderCamera (CameraBase, FilterWheelBase):
     __config__ = {"use_dss": True,
                   "ccd_width": 512,
                   "ccd_height": 512,
-                  "max_offset": 10}
+                  "max_offset": 10,
+                  "offset_every":0}
 
     def __init__(self):
         CameraBase.__init__(self)
@@ -94,6 +95,9 @@ class FakeGuiderCamera (CameraBase, FilterWheelBase):
         self._readoutModes = {self._MY_CCD:
                              {self._MY_READOUT_MODE: readoutMode}}
 
+        self.offsetX = 0
+        self.offsetY = 0
+        self.current = 0
 
     def __start__(self):
         self["camera_model"] = "Fake Cameras Inc."
@@ -165,7 +169,6 @@ class FakeGuiderCamera (CameraBase, FilterWheelBase):
         pix = None
         telescope = None
         dome = None
-        offset = [0.,0.] # store offset on image header for comparison purposes.
 
         (mode, binning, top,  left,
          width, height) = self._getReadoutModeInfo(imageRequest["binning"],
@@ -255,7 +258,7 @@ class FakeGuiderCamera (CameraBase, FilterWheelBase):
 
                         self.log.debug('Image size: %i,%i'%pix.shape)
                         # Apply random offset to the pix image
-                        offset = N.random.randint(-self["max_offset"]/2, self["max_offset"]/2, size=2)
+                        offset = [self.offsetX,self.offsetY]
                         self.log.debug('Image offset is %i x %i'%(offset[0],offset[1]))
                         ximg_corner = [int(self["max_offset"]/2),
                                        int(self["max_offset"]/2)]
@@ -292,12 +295,18 @@ class FakeGuiderCamera (CameraBase, FilterWheelBase):
         if ccd_height != height or ccd_width != width:
             pix = pix[top:top+height,left:left+width]
 
+        offset = N.random.randint(-self["max_offset"]/2, self["max_offset"]/2, size=2) # next offset
+
+        self.current+=1
+        if self.current > self["offset_every"]:
+            self.offsetX = offset[0]
+            self.offsetY = offset[1]
+            self.current = 0
+
         proxy = self._saveImage(
             imageRequest, pix, {"frame_start_time": self.__lastFrameStart,
                                 "frame_temperature": self.getTemperature(),
-                                "binning_factor": self._binning_factors[binning],
-                                "offsetX":offset[0],
-                                "offsetY":offset[1]})
+                                "binning_factor": self._binning_factors[binning]})
 
         # [ABORT POINT]
         if self.abort.isSet():
@@ -381,3 +390,7 @@ class FakeGuiderCamera (CameraBase, FilterWheelBase):
         self.filterChange(filter, self.__lastFilter)
         self.__lastFilter = filter
 
+    def getMetadata(self, request):
+
+        return super(FilterWheelBase,self).getMetadata(request) + [('OFFSETX', self.offsetX, "Current offset in X direction,in pixels"),
+                ('OFFSETY', self.offsetY, "Current offset in Y direction,in pixels")]

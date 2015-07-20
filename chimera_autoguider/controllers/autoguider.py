@@ -19,9 +19,11 @@ from chimera.controllers.imageserver.imagerequest import ImageRequest
 from chimera.controllers.imageserver.util         import getImageServer
 
 from chimera.util.image import Image
+from chimera.util.position import Position
 from chimera.util.output import red, green
 
 from astropy.io import fits
+from astropysics.utils.alg import centroid
 
 import numpy as np
 import yaml
@@ -29,6 +31,7 @@ import yaml
 plot = True
 try:
     import pylab as py
+    py.ion()
 except (ImportError, RuntimeError, ClassLoaderException):
     plot = False
 
@@ -198,16 +201,16 @@ class AutoGuider(ChimeraObject,IAutoguider):
             if windowCCD:
                 # retake first image around guide star
                 if not box:
-                    box = np.int(np.ceil(star_found['FWHM_IMAGE']*10))
+                    box = np.int(np.ceil(star_found['FWHM_IMAGE']*3))
                 self.imageRequest["window"] = "%i:%i,%i:%i"%(star_found['XWIN_IMAGE']-box/2,
                                                                star_found['XWIN_IMAGE']+box/2,
                                                                star_found['YWIN_IMAGE']-box/2,
                                                                star_found['YWIN_IMAGE']+box/2)
-                self.log.debug('Cutting CCD in subframe: %s'%(self.imageRequest['window']))
+                # self.log.debug('Cutting CCD in subframe: %s'%(self.imageRequest['window']))
                 # star_found['XWIN_IMAGE'],star_found['YWIN_IMAGE'] = self.getCentroid()
-                star_found = self._findBestStarToGuide(self._takeImageAndResolveStars())
-                # star_found['XWIN_IMAGE']-=box/2
-                # star_found['YWIN_IMAGE']-=box/2
+                #star_found = self._findBestStarToGuide(self._takeImageAndResolveStars())
+                star_found['XWIN_IMAGE'] = box/2
+                star_found['YWIN_IMAGE'] = box/2
 
             self.abort.clear()
             self.guideStart(star_found)
@@ -342,6 +345,25 @@ class AutoGuider(ChimeraObject,IAutoguider):
 
         try:
             frame = self._takeImage()
+            fname = '/tmp/autoguider.fits'
+            if os.path.exists(fname):
+                os.remove(fname)
+            frame.save(fname)
+            img = fits.getdata(fname)
+            # Extract some backgroud
+            img -= (np.mean(img)*0.9)
+            img[img < 0] = 0.
+
+            pY,pX = centroid(img)
+            ret['X'] = pX-position["XWIN_IMAGE"]
+            ret['Y'] = pY-position["YWIN_IMAGE"]
+            centerPos = frame.worldAt([position["XWIN_IMAGE"],
+                                    position["YWIN_IMAGE"]])
+            currPos = frame.worldAt([pX,
+                                     pY])
+            # offset = centerPos.angsep(currPos)
+            ret['E'] = (centerPos.ra.AS - currPos.ra.AS) * np.cos(currPos.dec.R)
+            ret['N'] = centerPos.dec.AS - currPos.dec.AS
         except:
             if self.abort.isSet():
                 ret['Status'] = GuiderStatus.ABORTED
@@ -358,19 +380,32 @@ class AutoGuider(ChimeraObject,IAutoguider):
         global plot
 
         if plot:
-            py.figure(1)
             fname = '/tmp/autoguider.fits'
             if os.path.exists(fname):
                 os.remove(fname)
             frame.save(fname)
             img = fits.getdata(fname)
+            hdr = fits.getheader(fname)
+            py.figure(1)
+            py.cla()
             py.imshow(img,origin='lower',interpolation='nearest',vmax=np.mean(img)*1.1,cmap=py.cm.gray)
-            py.plot(position['XWIN_IMAGE'],position['YWIN_IMAGE'],'bo')
-            py.plot(position['XWIN_IMAGE']+offset['X'],position['YWIN_IMAGE']+offset['Y'],'ro')
+            py.plot(position['XWIN_IMAGE'],position['YWIN_IMAGE'],'b+')
+            py.plot(position['XWIN_IMAGE']+offset['X'],position['YWIN_IMAGE']+offset['Y'],'rx')
+            py.plot(position['XWIN_IMAGE']-hdr['offsetY']+1,position['YWIN_IMAGE']-hdr['offsetX'],'r.')
+            err = np.sqrt(((-hdr['offsetY']+1 - offset['X']) ** 2) + ((-hdr['offsetX'] - offset['Y']) ** 2))
+
+            py.text(-3, -3, 'Offset: (%.2f/%.2f) px, Calculated: (%.2f/%.2f) px, Error: %3.2f' % (-hdr['offsetY']+1,
+                                                                                                 -hdr['offsetX'],
+                                                                                                 offset['X'],
+                                                                                                 offset['Y'],
+                                                                                                 err))
             py.savefig(os.path.join(SYSTEM_CONFIG_DIRECTORY, 'autoguider_%05i.png')%self.index)
-            self.index+=1
+            py.show()
+            self.index += 1
 
     def applyOffset(self, offset):
+        tel = self.getTel()
+        # tel.moveOffset()
         return
 
     def stop(self):
