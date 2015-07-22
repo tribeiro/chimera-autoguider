@@ -19,7 +19,7 @@ from chimera.controllers.imageserver.imagerequest import ImageRequest
 from chimera.controllers.imageserver.util         import getImageServer
 
 from chimera.util.image import Image
-from chimera.util.position import Position
+from chimera.util.coord import Coord
 from chimera.util.output import red, green
 
 from astropy.io import fits
@@ -362,8 +362,8 @@ class AutoGuider(ChimeraObject,IAutoguider):
             currPos = frame.worldAt([pX,
                                      pY])
             # offset = centerPos.angsep(currPos)
-            ret['E'] = (centerPos.ra.AS - currPos.ra.AS) * np.cos(currPos.dec.R)
-            ret['N'] = centerPos.dec.AS - currPos.dec.AS
+            ret['E'] = Coord.fromAS((centerPos.ra.AS - currPos.ra.AS) * np.cos(currPos.dec.R))
+            ret['N'] = Coord.fromAS(centerPos.dec.AS - currPos.dec.AS)
         except:
             if self.abort.isSet():
                 ret['Status'] = GuiderStatus.ABORTED
@@ -405,8 +405,8 @@ class AutoGuider(ChimeraObject,IAutoguider):
 
     def applyOffset(self, offset):
         tel = self.getTel()
-        # tel.moveOffset()
-        return
+        tel.moveOffset(offset['N'],offset['E'])
+        # return
 
     def stop(self):
 
