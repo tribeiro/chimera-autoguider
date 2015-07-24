@@ -20,6 +20,7 @@ from chimera.controllers.imageserver.util         import getImageServer
 
 from chimera.util.image import Image
 from chimera.util.coord import Coord
+from chimera.util.position import Position
 from chimera.util.output import red, green
 
 from astropy.io import fits
@@ -198,37 +199,49 @@ class AutoGuider(ChimeraObject,IAutoguider):
 
         # Start guiding
         try:
+            self.index = 0
+            if not box:
+                box = np.int(np.ceil(star_found['FWHM_IMAGE']*3))
+            self.gdrWin = [star_found['XWIN_IMAGE']-box/2,
+                           star_found['XWIN_IMAGE']+box/2,
+                           star_found['YWIN_IMAGE']-box/2,
+                           star_found['YWIN_IMAGE']+box/2]
             if windowCCD:
                 # retake first image around guide star
-                if not box:
-                    box = np.int(np.ceil(star_found['FWHM_IMAGE']*3))
-                self.imageRequest["window"] = "%i:%i,%i:%i"%(star_found['XWIN_IMAGE']-box/2,
-                                                               star_found['XWIN_IMAGE']+box/2,
-                                                               star_found['YWIN_IMAGE']-box/2,
-                                                               star_found['YWIN_IMAGE']+box/2)
+                self.imageRequest["window"] = "%i:%i,%i:%i"%(self.gdrWin[0],
+                                                             self.gdrWin[1],
+                                                             self.gdrWin[2],
+                                                             self.gdrWin[3])
+                self.gdrWin = [0,box,0,box]
                 # self.log.debug('Cutting CCD in subframe: %s'%(self.imageRequest['window']))
                 # star_found['XWIN_IMAGE'],star_found['YWIN_IMAGE'] = self.getCentroid()
                 #star_found = self._findBestStarToGuide(self._takeImageAndResolveStars())
                 star_found['XWIN_IMAGE'] = box/2
                 star_found['YWIN_IMAGE'] = box/2
+                self.ref_frame = self._takeImage()
+                initoffset = self.getOffset(star_found,self.ref_frame)
+                star_found['XWIN_IMAGE'] += initoffset['X']
+                star_found['YWIN_IMAGE'] += initoffset['Y']
+            else:
+                self.ref_frame = self.lastFrame
 
             self.abort.clear()
             self.guideStart(star_found)
 
             msg=''
             self._state = GuiderStatus.GUIDING
-            self.index = 1
 
             def process():
                 nlost = 0
 
                 while True:
-                    offset = self.getOffset(star_found)
+                    frame = self._takeImage()
+                    offset = self.getOffset(star_found,frame)
                     self.log.debug('Offset %f x %f'%(offset['N'],offset['E']))
                     if offset:
                         self.log.debug('Applying offset %s x %s'%(offset['N'],offset['E']))
                         self.applyOffset(offset)
-                        self.offsetComplete(offset)
+                        self.offsetComplete(offset,frame)
                     else:
                         nlost+=1
 
@@ -292,7 +305,10 @@ class AutoGuider(ChimeraObject,IAutoguider):
         frame = cam.expose(self.imageRequest)
 
         if frame:
+            self.lastFrame = frame[0]
             return frame[0]
+        elif self.state() == GuiderStatus.OFF:
+            return None
         else:
             raise Exception("Error taking image.")
 
@@ -316,8 +332,22 @@ class AutoGuider(ChimeraObject,IAutoguider):
                                      "FLUX_BEST", "FWHM_IMAGE",
                                      "FLAGS"]
 
+        if not os.path.exists(frame.filename()):
+            self.log.warning('File %s does not exists.'%frame.filename())
+            hdu = frame.hdu()
+            self.log.debug(hdu[0].data.shape)
+            # hdu.writeto('/tmp/foo.fits')
+            # self.log.debug(frame.http())
+            # srv = getImageServer(self.getManager())
+            # id = os.path.basename(frame.http())
+            # #frame = srv.http.request(frame.http())
+            # img = srv.getImageByID(id)
+            # print img
+            #img.writeto('/tmp/foo.fits')
+
         catalogName = os.path.splitext(frame.filename())[0] + ".catalog"
         configName = os.path.splitext(frame.filename())[0] + ".config"
+        self.log.debug('Filename: %s'%frame.filename())
         return frame.extract(config, saveCatalog=catalogName, saveConfig=configName)
 
     def _findGuideStar(self,catalog,position):
@@ -338,29 +368,41 @@ class AutoGuider(ChimeraObject,IAutoguider):
         return max(fluxes, key=lambda star: star["FLUX_BEST"])
 
 
-    def getOffset(self,position):
+    def getOffset(self,position,frame):
 
         ret = {'X':0.,'Y':0.,
-               'N':0.,'E':0.,'Status':self.state()}
+               'N':Coord.fromAS(0.),'E':Coord.fromAS(0.),'Status':self.state(),
+               'CurrentPos':Position.fromRaDec("00:00:00","00:00:00"),
+               'ReferencePos':Position.fromRaDec("00:00:00","00:00:00")}
 
         try:
-            frame = self._takeImage()
+            # frame = self._takeImage()
             fname = '/tmp/autoguider.fits'
             if os.path.exists(fname):
                 os.remove(fname)
             frame.save(fname)
-            img = fits.getdata(fname)
+            img = fits.getdata(fname)[self.gdrWin[2]:self.gdrWin[3],
+                                      self.gdrWin[0]:self.gdrWin[1]]
             # Extract some backgroud
             img -= (np.mean(img)*0.9)
             img[img < 0] = 0.
 
             pY,pX = centroid(img)
-            ret['X'] = pX-position["XWIN_IMAGE"]
-            ret['Y'] = pY-position["YWIN_IMAGE"]
-            centerPos = frame.worldAt([position["XWIN_IMAGE"],
-                                    position["YWIN_IMAGE"]])
-            currPos = frame.worldAt([pX,
-                                     pY])
+            ret['X'] = pX+self.gdrWin[0]-position["XWIN_IMAGE"]
+            ret['Y'] = pY+self.gdrWin[2]-position["YWIN_IMAGE"]
+
+            if self.ref_frame:
+                centerPos = self.ref_frame.worldAt([position["XWIN_IMAGE"],
+                                                    position["YWIN_IMAGE"]])
+            else:
+                centerPos = frame.worldAt([position["XWIN_IMAGE"],
+                                           position["YWIN_IMAGE"]])
+
+            currPos = frame.worldAt([pX+self.gdrWin[0],
+                                     pY+self.gdrWin[2]])
+            ret['CurrentPos'] = currPos
+            ret['ReferencePos'] = centerPos
+
             # offset = centerPos.angsep(currPos)
             ret['E'] = Coord.fromAS((centerPos.ra.AS - currPos.ra.AS) * np.cos(currPos.dec.R))
             ret['N'] = Coord.fromAS(centerPos.dec.AS - currPos.dec.AS)
@@ -404,15 +446,50 @@ class AutoGuider(ChimeraObject,IAutoguider):
             self.index += 1
 
     def applyOffset(self, offset):
-        tel = self.getTel()
-        tel.moveOffset(offset['N'],offset['E'])
+        # tel = self.getTel()
+        # self.log.debug('[applyOffset]: %s %s'%(offset['N'],offset['E']))
+        # tel.moveOffset(offset['N'],offset['E'])
+
+        telescope = self.getTel()
+
+        self.log.debug(40 * "=")
+        self.log.debug("current position ra/dec: %s" % telescope.getPositionRaDec())
+        self.log.debug("current position:alt/az: %s" % telescope.getPositionAltAz())
+
+        self.log.debug(40 * "=")
+        self.log.debug("moving %s arcseconds (%s) %s ... " % (offset['N'].AS,
+                                                              offset['N'].strfcoord(),
+                                                              'North'))
+        self.log.debug("moving %s arcseconds (%s) %s ... " % (offset['E'].AS,
+                                                              offset['E'].strfcoord(),
+                                                              'East'))
+
+        try:
+            if offset['N'].AS > 0.:
+                telescope.moveNorth(offset['N'].AS)
+            elif offset['N'].AS < 0.:
+                telescope.moveSouth(np.abs(offset['N'].AS))
+
+            if offset['E'].AS > 0.:
+                telescope.moveEast(offset['E'].AS)
+            elif offset['E'].AS < 0.:
+                telescope.moveWest(np.abs(offset['E'].AS))
+
+            self.log.debug(40 * "=")
+            self.log.debug("new position ra/dec: %s" % telescope.getPositionRaDec())
+            self.log.debug("new position:alt/az: %s" % telescope.getPositionAltAz())
+            self.log.debug(40 * "=")
+
+        except Exception, e:
+            self.log.error("ERROR. (%s)" % e)
+
         # return
 
     def stop(self):
 
         self.abort.set() # do this first!
-        self.getCam().abortExposure(readout=False)
         self._state = GuiderStatus.OFF
+        self.getCam().abortExposure(readout=False)
 
     def state(self):
         return self._state

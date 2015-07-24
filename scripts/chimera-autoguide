@@ -24,6 +24,8 @@ from chimera.core.constants import DEFAULT_PROGRAM_DATABASE
 from chimera.core.callback import callback
 from chimera.util.position import Position
 from chimera.util.output import blue, green, red
+from chimera.util.ds9 import DS9
+from chimera.interfaces.autoguider import GuiderStatus
 
 import re
 import sys
@@ -44,6 +46,18 @@ class ChimeraAutoGuide (ChimeraCLI):
                            required=True,
                            help="Autoguider controller to be used",
                            helpGroup="GUIDER")
+
+        self.addHelpGroup("DISPLAY", "Display configuration")
+        self.addParameters(dict(name="disable_display",
+                                long="disable-display",
+                                type=ParameterType.BOOLEAN,
+                                helpGroup="DISPLAY",
+                                help="Don't try to display image on DS9. default is display for exptime >= 5"),
+                           dict(name="force_display",
+                                long="force-display",
+                                type=ParameterType.BOOLEAN,
+                                helpGroup="DISPLAY",
+                                help="Always display image on DS9 regardless of exptime."))
 
         self.addHelpGroup("EXPOSE", "Exposure control")
         self.addParameters(dict(name="exptime",
@@ -140,12 +154,33 @@ class ChimeraAutoGuide (ChimeraCLI):
     @action(help="Monitor autoguider actions", helpGroup="RUN")
     def monitor(self, options):
 
+        # DS9
+        ds9 = None
+        if (not options.disable_display and options.exptime >= 5) or options.force_display:
+            try:
+                ds9 = DS9(open=True)
+            except IOError:
+                self.err("Problems starting DS9. Display disabled.")
+
+
         @callback(self.localManager)
-        def offsetCompleteClbk(offset):
+        def offsetCompleteClbk(offset,frame):
+            if offset['Status'] == GuiderStatus.ABORTED:
+                return
+
             self.out("=" * 40)
             self.out("%s: (X: %.2f | Y: %.2f ) | (N: %.2f | E: %.2f)" % (blue("[autoguider]"),
                                                                          offset['X'], offset['Y'],
                                                                          offset['N'], offset['E']))
+            if ds9:
+                if not os.path.exists(frame.filename()):
+                    frame.save(frame.filename())
+                ds9.displayImage(frame)
+                ds9.set("regions",'fk5; circle(%s,%s,1.5")'%(offset["ReferencePos"].ra,
+                                                               offset["ReferencePos"].dec))
+
+                ds9.set("regions",'fk5; circle(%s,%s,0.75")'%(offset["CurrentPos"].ra,
+                                                               offset["CurrentPos"].dec))
 
         @callback(self.localManager)
         def guideStartClbk(position):
