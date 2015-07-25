@@ -28,6 +28,7 @@ from astropysics.utils.alg import centroid
 
 import numpy as np
 import yaml
+import urllib
 
 plot = True
 try:
@@ -294,7 +295,7 @@ class AutoGuider(ChimeraObject,IAutoguider):
             except IndexError:
                 raise ChimeraException("Cannot find debug images")
 
-        self.imageRequest["filename"] = os.path.join(SYSTEM_CONFIG_DIRECTORY, self.currentRun, "autoguider.fits")
+        self.imageRequest["filename"] = os.path.join(self.currentRun, "autoguider.fits")
 
         cam = self.getCam()
 
@@ -305,8 +306,34 @@ class AutoGuider(ChimeraObject,IAutoguider):
         frame = cam.expose(self.imageRequest)
 
         if frame:
-            self.lastFrame = frame[0]
-            return frame[0]
+            frame = frame[0]
+            # Make sure the frame is local. This is needed for further process
+            if not os.path.exists(frame.filename()):
+                self.log.warning('File %s does not exists. Trying to save it.'%frame.filename())
+                # Try to save it first
+                try:
+                    frame.save(frame.filename())
+                except:
+                    self.log.warning('Problem saving file...')
+                    pass
+                # Check again
+                if not os.path.exists(frame.filename()):
+                    self.log.warning('File %s does not exists. Is this a remote instrument? Downloading file.'%frame.filename())
+                    download = urllib.urlretrieve(frame.http())
+                    # Todo: Check that the download was ok
+                    self.log.debug('File stored in %s'%download[0])
+                    frame = Image(download[0],fits.open(download[0]))
+                # hdu.writeto('/tmp/foo.fits')
+                # self.log.debug(frame.http())
+                # srv = getImageServer(self.getManager())
+                # id = os.path.basename(frame.http())
+                # #frame = srv.http.request(frame.http())
+                # img = srv.getImageByID(id)
+                # print img
+                #img.writeto('/tmp/foo.fits')
+
+            self.lastFrame = frame
+            return frame
         elif self.state() == GuiderStatus.OFF:
             return None
         else:
@@ -331,19 +358,6 @@ class AutoGuider(ChimeraObject,IAutoguider):
                                      "XWIN_IMAGE", "YWIN_IMAGE",
                                      "FLUX_BEST", "FWHM_IMAGE",
                                      "FLAGS"]
-
-        if not os.path.exists(frame.filename()):
-            self.log.warning('File %s does not exists.'%frame.filename())
-            hdu = frame.hdu()
-            self.log.debug(hdu[0].data.shape)
-            # hdu.writeto('/tmp/foo.fits')
-            # self.log.debug(frame.http())
-            # srv = getImageServer(self.getManager())
-            # id = os.path.basename(frame.http())
-            # #frame = srv.http.request(frame.http())
-            # img = srv.getImageByID(id)
-            # print img
-            #img.writeto('/tmp/foo.fits')
 
         catalogName = os.path.splitext(frame.filename())[0] + ".catalog"
         configName = os.path.splitext(frame.filename())[0] + ".config"
