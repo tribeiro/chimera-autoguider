@@ -322,7 +322,8 @@ class AutoGuider(ChimeraObject,IAutoguider):
                     download = urllib.urlretrieve(frame.http())
                     # Todo: Check that the download was ok
                     self.log.debug('File stored in %s'%download[0])
-                    frame = Image(download[0],fits.open(download[0]))
+                    frame = Image.fromFile(download[0])
+            frame['CTYPE2'] = 'DEC--TAN'
                 # hdu.writeto('/tmp/foo.fits')
                 # self.log.debug(frame.http())
                 # srv = getImageServer(self.getManager())
@@ -432,6 +433,8 @@ class AutoGuider(ChimeraObject,IAutoguider):
         return ret
 
     def plot(self,frame,position,offset):
+
+        return
 
         global plot
 
