@@ -189,7 +189,7 @@ class AutoGuider(ChimeraObject,IAutoguider):
         if not star_found:
             tries = 0
 
-            while not star_found and tries < self["max_tries"]:
+            while not star_found and tries < self["max_acquire_tries"]:
                 star_found = self._findBestStarToGuide(self._takeImageAndResolveStars())
                 tries += 1
 
@@ -251,9 +251,9 @@ class AutoGuider(ChimeraObject,IAutoguider):
                         msg = 'Sequence aborted.'
                         break
 
-                    if nlost > self['nlost']:
+                    if nlost > self['max_fit_tries']:
                         self._state = GuiderStatus.ERROR
-                        msg = 'Lost guide star. Stopping after %i tries.'%self['nlost']
+                        msg = 'Lost guide star. Stopping after %i tries.'%self['max_fit_tries']
                         break
 
                     if interval:
