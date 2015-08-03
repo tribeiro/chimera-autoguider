@@ -62,7 +62,7 @@ class ChimeraAutoGuide (ChimeraCLI):
         self.addHelpGroup("EXPOSE", "Exposure control")
         self.addParameters(dict(name="exptime",
                                 short="t",
-                                type="string",
+                                type="float",
                                 default=1,
                                 helpGroup="EXPOSE",
                                 help="Integration time in seconds for each frame"),
@@ -169,9 +169,9 @@ class ChimeraAutoGuide (ChimeraCLI):
                 return
 
             self.out("=" * 40)
-            self.out("%s: (X: %.2f | Y: %.2f ) | (N: %.2f | E: %.2f)" % (blue("[autoguider]"),
+            self.out("%s: (X: %+.2f | Y: %+.2f ) | (N: %+.2f\" | E: %+.2f\")" % (blue("[autoguider]"),
                                                                          offset['X'], offset['Y'],
-                                                                         offset['N'], offset['E']))
+                                                                         offset['N'].AS, offset['E'].AS))
             if ds9:
                 if not os.path.exists(frame.filename()):
                     frame.save(frame.filename())

@@ -168,6 +168,7 @@ class AutoGuider(ChimeraObject,IAutoguider):
         self.imageRequest["exptime"] = exptime or 1.
         self.imageRequest["frames"] = 1
         self.imageRequest["shutter"] = "OPEN"
+        self.imageRequest["wait_dome"] = False
 
         if filter:
             self.filter = filter
@@ -225,6 +226,9 @@ class AutoGuider(ChimeraObject,IAutoguider):
                 star_found['YWIN_IMAGE'] += initoffset['Y']
             else:
                 self.ref_frame = self.lastFrame
+                initoffset = self.getOffset(star_found,self.ref_frame)
+                star_found['XWIN_IMAGE'] += initoffset['X']
+                star_found['YWIN_IMAGE'] += initoffset['Y']
 
             self.abort.clear()
             self.guideStart(star_found)
@@ -482,14 +486,14 @@ class AutoGuider(ChimeraObject,IAutoguider):
                                                               'East'))
 
         try:
-            if offset['N'].AS > 0.:
+            if offset['N'].AS > 1e-2:
                 telescope.moveNorth(offset['N'].AS)
-            elif offset['N'].AS < 0.:
+            elif offset['N'].AS < -1.0e-2:
                 telescope.moveSouth(np.abs(offset['N'].AS))
 
-            if offset['E'].AS > 0.:
+            if offset['E'].AS > 1e-2:
                 telescope.moveEast(offset['E'].AS)
-            elif offset['E'].AS < 0.:
+            elif offset['E'].AS < -1e-2:
                 telescope.moveWest(np.abs(offset['E'].AS))
 
             self.log.debug(40 * "=")
