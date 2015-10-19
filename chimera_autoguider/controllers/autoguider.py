@@ -261,6 +261,7 @@ class AutoGuider(ChimeraObject,IAutoguider):
                         break
 
                     if interval:
+                        self.log.debug('Waiting %f seconds before next acquisition.'%interval)
                         time.sleep(interval)
 
                 self.guideStop(self._state,msg)
@@ -403,10 +404,14 @@ class AutoGuider(ChimeraObject,IAutoguider):
             img = fits.getdata(fname)[self.gdrWin[2]:self.gdrWin[3],
                                       self.gdrWin[0]:self.gdrWin[1]]
             # Extract some backgroud
-            img -= (np.mean(img)*0.9)
+            img -= (np.mean(img)*1.0)
             img[img < 0] = 0.
+            np.save(os.path.join(SYSTEM_CONFIG_DIRECTORY, 'autoguider_%05i.npy')%self.index,
+                    img)
 
             pY,pX = centroid(img)
+            self.log.debug('Offset: %f, %f'%(pX,pY))
+            self.index+=1
             ret['X'] = pX+self.gdrWin[0]-position["XWIN_IMAGE"]
             ret['Y'] = pY+self.gdrWin[2]-position["YWIN_IMAGE"]
 
@@ -454,7 +459,7 @@ class AutoGuider(ChimeraObject,IAutoguider):
             py.imshow(img,origin='lower',interpolation='nearest',vmax=np.mean(img)*1.1,cmap=py.cm.gray)
             py.plot(position['XWIN_IMAGE'],position['YWIN_IMAGE'],'b+')
             py.plot(position['XWIN_IMAGE']+offset['X'],position['YWIN_IMAGE']+offset['Y'],'rx')
-            py.plot(position['XWIN_IMAGE']-hdr['offsetY']+1,position['YWIN_IMAGE']-hdr['offsetX'],'r.')
+            py.plot(position['XWmstIN_IMAGE']-hdr['offsetY']+1,position['YWIN_IMAGE']-hdr['offsetX'],'r.')
             err = np.sqrt(((-hdr['offsetY']+1 - offset['X']) ** 2) + ((-hdr['offsetX'] - offset['Y']) ** 2))
 
             py.text(-3, -3, 'Offset: (%.2f/%.2f) px, Calculated: (%.2f/%.2f) px, Error: %3.2f' % (-hdr['offsetY']+1,
@@ -486,15 +491,15 @@ class AutoGuider(ChimeraObject,IAutoguider):
                                                               'East'))
 
         try:
-            if offset['N'].AS > 1e-2:
-                telescope.moveNorth(offset['N'].AS)
-            elif offset['N'].AS < -1.0e-2:
-                telescope.moveSouth(np.abs(offset['N'].AS))
+            if offset['N'].AS > 1e-1:
+                telescope.moveSouth(offset['N'].AS)
+            elif offset['N'].AS < -1e-1:
+                telescope.moveNorth(np.abs(offset['N'].AS))
 
-            if offset['E'].AS > 1e-2:
-                telescope.moveEast(offset['E'].AS)
-            elif offset['E'].AS < -1e-2:
-                telescope.moveWest(np.abs(offset['E'].AS))
+            if offset['E'].AS > 1e-1:
+                telescope.moveWest(offset['E'].AS)
+            elif offset['E'].AS < -1e-1:
+                telescope.moveEast(np.abs(offset['E'].AS))
 
             self.log.debug(40 * "=")
             self.log.debug("new position ra/dec: %s" % telescope.getPositionRaDec())
